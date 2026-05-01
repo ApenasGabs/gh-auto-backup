@@ -36,16 +36,37 @@ Edite o `.env` com suas credenciais:
 *   `GITEA_TOKEN`: Token da sua instância Gitea.
 *   `GITEA_URL` & `GITEA_SSH_HOST`: Endereços da sua instância self-hosted.
 
-### 3. Execução
-Para subir o serviço em background:
+### 3. Execução (Local / Testes)
+Antes de deixar o bot rodando no piloto automático, é recomendado rodar as etapas iniciais localmente (requer Go instalado):
+
 ```bash
-docker compose up -d --build
+# Compilar o binário
+go build -o mirror-bot
 ```
 
-Para acompanhar os logs de sincronização:
+**Modos de Execução Disponíveis:**
+*   **Dry Run (Comparar e listar):** Lista todos os repositórios do GitHub e verifica quais faltam no GitLab, gerando uma tabela comparativa sem alterar nada.
+    ```bash
+    ./mirror-bot --list
+    ```
+*   **Modo Interativo (Seleção manual):** Exibe um checklist para você selecionar quais repositórios específicos deseja migrar (ótimo para "Amostras Grátis" e testes iniciais).
+    ```bash
+    ./mirror-bot --interactive
+    ```
+*   **Modo Full Auto:** Inicia o processo automático de sincronização para todos os repositórios listados.
+    ```bash
+    ./mirror-bot --all
+    ```
+
+### 4. Execução em Produção (Docker)
+Após testar localmente, você pode empacotar a execução no Docker. 
+Como a ferramenta agora requer uma flag de execução, você pode inicializar o container rodando apenas o modo desejado:
+
 ```bash
-docker compose logs -f
+# Executar a sincronização de todos os repositórios (--all) via Docker
+docker compose run --rm mirror-bot ./mirror-bot --all
 ```
+*(Dica: Como o bot realiza a sincronização e finaliza sua execução, você pode adicionar este comando em um `cronjob` para rodar de hora em hora em seu servidor).*
 
 ## ⚙️ Variáveis de Ambiente Adicionais
 *   `SYNC_INTERVAL`: Intervalo entre as sincronizações (ex: `1h`, `30m`). Default: `1h`.

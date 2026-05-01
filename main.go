@@ -19,6 +19,7 @@ import (
 	"github.com/sirupsen/logrus"
 	gitlab "github.com/xanzy/go-gitlab"
 	"golang.org/x/oauth2"
+	"github.com/joho/godotenv"
 )
 
 const (
@@ -45,6 +46,11 @@ func main() {
 	interactiveMode := flag.Bool("interactive", false, "Abre o menu de seleção interativo")
 	allMode := flag.Bool("all", false, "Roda o fluxo automático para todos os repositórios")
 	flag.Parse()
+
+	// Load .env file if it exists
+	if err := godotenv.Load(); err != nil {
+		logrus.Debug("No .env file found")
+	}
 
 	// Initialize Logrus
 	logrus.SetFormatter(&logrus.TextFormatter{
@@ -84,7 +90,7 @@ func main() {
 	var gitlabClient *gitlab.Client
 	if gitlabToken != "" {
 		var err error
-		if gitlabURL := os.Getenv("GITLAB_BASE_URL"); gitlabURL != "" {
+		if gitlabURL := os.Getenv("GITLAB_BASE_URL"); gitlabURL != "" && gitlabURL != "https://gitlab.com" {
 			gitlabClient, err = gitlab.NewClient(gitlabToken, gitlab.WithBaseURL(gitlabURL+"/api/v4"))
 		} else {
 			gitlabClient, err = gitlab.NewClient(gitlabToken)
@@ -110,12 +116,15 @@ func main() {
 	// Fetch GitHub and GitLab info
 	githubRepos, err := fetchGitHubRepos(ctx, githubClient)
 	if err != nil {
-		logrus.Fatalf("Error fetching GitHub repos: %v", err)
+		logrus.Errorf("Error fetching GitHub repos: %v", err)
+	}
+	if githubRepos == nil {
+		logrus.Fatal("Não foi possível carregar repositórios do GitHub. Encerrando.")
 	}
 
 	gitlabProjects, err := fetchGitLabRepos(ctx, gitlabClient)
 	if err != nil {
-		logrus.Fatalf("Error fetching GitLab projects: %v", err)
+		logrus.Errorf("Error fetching GitLab projects (continuing without GitLab info): %v", err)
 	}
 
 	repoStatuses := compareRepos(githubRepos, gitlabProjects)
@@ -301,7 +310,7 @@ func syncReposList(ctx context.Context, repos []RepoStatus, githubClient *github
 
 func processRepository(ctx context.Context, repo *github.Repository, githubClient *github.Client, gitlabClient *gitlab.Client, giteaClient *gitea.Client, storageDir string, interactive bool) error {
 	repoName := *repo.Name
-	repoURL := *repo.SSHURL
+	repoURL := fmt.Sprintf("https://x-access-token:%s@github.com/%s.git", os.Getenv("GITHUB_TOKEN"), *repo.FullName)
 	isPrivate := *repo.Private
 
 	startTime := time.Now()
@@ -310,7 +319,7 @@ func processRepository(ctx context.Context, repo *github.Repository, githubClien
 	var mirrorURLs []string
 
 	if gitlabClient != nil {
-		gitlabURL := fmt.Sprintf("git@gitlab.com:%s/%s.git", getGitHubLogin(), repoName)
+		gitlabURL := fmt.Sprintf("https://oauth2:%s@gitlab.com/%s/%s.git", os.Getenv("GITLAB_TOKEN"), getGitHubLogin(), repoName)
 		mirrorURLs = append(mirrorURLs, gitlabURL)
 
 		if err := ensureGitLabRepoExists(ctx, gitlabClient, repoName, isPrivate, interactive); err != nil {
@@ -371,12 +380,12 @@ func syncRepo(ctx context.Context, repoName string, githubURL string, mirrorURLs
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
-			logrus.Infof("[%s] Pushing to %s...", repoName, mirrorURL)
+			logrus.Infof("[%s] Pushing to %s...", repoName, maskURL(mirrorURL))
 			cmd := exec.CommandContext(ctx, "git", "-C", localPath, "push", "--mirror", mirrorURL)
 			if output, err := cmd.CombinedOutput(); err != nil {
-				logrus.Warnf("[%s] Failed to push to %s: %v (output: %s)", repoName, mirrorURL, err, string(output))
+				logrus.Warnf("[%s] Failed to push to %s: %v (output: %s)", repoName, maskURL(mirrorURL), err, string(output))
 			} else {
-				logrus.Infof("[%s] Push concluído para %s:\n%s", repoName, mirrorURL, string(output))
+				logrus.Infof("[%s] Push concluído para %s:\n%s", repoName, maskURL(mirrorURL), string(output))
 			}
 		}
 	}
@@ -468,5 +477,20 @@ func getGitHubLogin() string {
 	if login := os.Getenv("GITHUB_LOGIN"); login != "" {
 		return login
 	}
-	return "apenasgabs"
+	return "Apenasgabs"
+}
+
+func maskURL(u string) string {
+	// Procura o padrão :token@ e substitui o token por ***
+	// Ex: https://oauth2:MEU_TOKEN@gitlab.com -> https://oauth2:***@gitlab.com
+	start := -1
+	for i := 0; i < len(u); i++ {
+		if u[i] == ':' {
+			start = i
+		}
+		if u[i] == '@' && start != -1 {
+			return u[:start+1] + "***" + u[i:]
+		}
+	}
+	return u
 }
