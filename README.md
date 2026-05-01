@@ -22,8 +22,10 @@ Projetado para rodar silenciosamente em background via Docker, a ferramenta orqu
 ## 🏁 Como Rodar
 
 ### 1. Pré-requisitos
-*   **Docker & Docker Compose** instalados.
-*   **Chave SSH** configurada: A chave SSH da sua máquina host (geralmente em `~/.ssh/id_rsa`) deve estar adicionada como "Deploy Key" ou "SSH Key" no seu perfil do GitHub, GitLab e Gitea para permitir o clone/push sem senha.
+*   **Docker & Docker Compose** (opcional, para execução em container).
+*   **Node.js & PM2** (opcional, para execução via daemon/cron no host).
+*   **Go 1.21+** (para compilação manual).
+*   **Chave SSH configurada:** A chave SSH da sua máquina host (geralmente em `~/.ssh/id_rsa`) deve estar adicionada como "SSH Key" no GitHub, GitLab e Gitea para permitir o clone/push sem senha.
 
 ### 2. Configuração
 Crie um arquivo `.env` baseado no exemplo:
@@ -36,37 +38,52 @@ Edite o `.env` com suas credenciais:
 *   `GITEA_TOKEN`: Token da sua instância Gitea.
 *   `GITEA_URL` & `GITEA_SSH_HOST`: Endereços da sua instância self-hosted.
 
-### 3. Execução (Local / Testes)
-Antes de deixar o bot rodando no piloto automático, é recomendado rodar as etapas iniciais localmente (requer Go instalado):
-
+### 3. Compilação
+Antes de rodar em qualquer ambiente, compile o binário:
 ```bash
-# Compilar o binário
 go build -o mirror-bot
 ```
 
-**Modos de Execução Disponíveis:**
-*   **Dry Run (Comparar e listar):** Lista todos os repositórios do GitHub e verifica quais faltam no GitLab, gerando uma tabela comparativa sem alterar nada.
+### 4. Modos de Execução (Testes)
+*   **Dry Run (Comparar e listar):**
     ```bash
     ./mirror-bot --list
     ```
-*   **Modo Interativo (Seleção manual):** Exibe um checklist para você selecionar quais repositórios específicos deseja migrar (ótimo para "Amostras Grátis" e testes iniciais).
+*   **Modo Interativo (Seleção manual):**
     ```bash
     ./mirror-bot --interactive
     ```
-*   **Modo Full Auto:** Inicia o processo automático de sincronização para todos os repositórios listados.
+*   **Modo Full Auto:**
     ```bash
     ./mirror-bot --all
     ```
 
-### 4. Execução em Produção (Docker)
-Após testar localmente, você pode empacotar a execução no Docker. 
-Como a ferramenta agora requer uma flag de execução, você pode inicializar o container rodando apenas o modo desejado:
-
+### 5. Produção: Opção A (Docker)
+Recomendado para ambientes isolados.
 ```bash
 # Executar a sincronização de todos os repositórios (--all) via Docker
 docker compose run --rm mirror-bot ./mirror-bot --all
 ```
-*(Dica: Como o bot realiza a sincronização e finaliza sua execução, você pode adicionar este comando em um `cronjob` para rodar de hora em hora em seu servidor).*
+*(Dica: Você pode adicionar este comando em um `cronjob` no host).*
+
+### 6. Produção: Opção B (PM2) - Recomendado
+Ideal para servidores Linux (VPS). Utiliza o `ecosystem.config.js` para gerenciar execuções agendadas via Cron.
+
+```bash
+# Iniciar o processo via PM2
+pm2 start ecosystem.config.js
+
+# Salvar a lista para persistir após reboots do sistema
+pm2 save
+
+# Monitorar a execução e logs
+pm2 logs mirror-bot
+```
+
+**Comandos Úteis PM2:**
+*   `pm2 status`: Lista os processos e status do agendamento.
+*   `pm2 stop mirror-bot`: Interrompe o agendamento.
+*   `pm2 trigger mirror-bot`: (Se configurado) ou apenas `pm2 restart mirror-bot` para forçar uma execução agora.
 
 ## ⚙️ Variáveis de Ambiente Adicionais
 *   `SYNC_INTERVAL`: Intervalo entre as sincronizações (ex: `1h`, `30m`). Default: `1h`.
