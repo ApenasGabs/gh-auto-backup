@@ -1,0 +1,31 @@
+services:
+  mirror-bot:
+    build: .
+    container_name: github-mirror-bot
+    restart: unless-stopped
+    volumes:
+      # Mount storage directory for persistent mirror storage
+      - ./storage:/app/storage
+      # Mount host SSH key for git operations (read-only)
+      - ~/.ssh:/root/.ssh:ro
+    environment:
+      # GitHub token (required)
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      # GitLab token (optional)
+      - GITLAB_TOKEN=${GITLAB_TOKEN}
+      # Custom Gitea token (optional)
+      - GITEA_TOKEN=${GITEA_TOKEN}
+      # GitHub login (defaults to apenasgabs)
+      - GITHUB_LOGIN=${GITHUB_LOGIN:-apenasgabs}
+      # GitLab base URL (optional, for self-hosted instances)
+      - GITLAB_BASE_URL=${GITLAB_BASE_URL}
+      # Custom Gitea instance URL (optional)
+      - GITEA_URL=${GITEA_URL}
+      # Custom Gitea SSH Host (optional, defaults to localhost)
+      - GITEA_SSH_HOST=${GITEA_SSH_HOST}
+      # Sync interval (default: 1h)
+      - SYNC_INTERVAL=${SYNC_INTERVAL:-1h}
+      # Worker count (default: 5)
+      - WORKER_COUNT=${WORKER_COUNT:-5}
+      # Storage directory (default: ./storage)
+      - STORAGE_DIR=${STORAGE_DIR:-./storage}
