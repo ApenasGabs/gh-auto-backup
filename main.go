@@ -13,6 +13,10 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"net/url"
+	"path"
+	"strings"
+
 	"code.gitea.io/sdk/gitea"
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/google/go-github/v60/github"
@@ -127,7 +131,12 @@ func main() {
 		logrus.Errorf("Error fetching GitLab projects (continuing without GitLab info): %v", err)
 	}
 
-	repoStatuses := compareRepos(githubRepos, gitlabProjects)
+	giteaRepos, err := fetchGiteaRepos(ctx, giteaClient)
+	if err != nil {
+		logrus.Errorf("Error fetching Gitea repositories (continuing without Gitea info): %v", err)
+	}
+
+	repoStatuses := compareRepos(githubRepos, gitlabProjects, giteaRepos)
 
 	if *listMode {
 		printStatusTable(repoStatuses)
@@ -224,14 +233,43 @@ func fetchGitLabRepos(ctx context.Context, client *gitlab.Client) (map[string]bo
 	return gitlabProjects, nil
 }
 
-func compareRepos(githubRepos []*github.Repository, gitlabProjects map[string]bool) []RepoStatus {
+func fetchGiteaRepos(ctx context.Context, client *gitea.Client) (map[string]bool, error) {
+	if client == nil {
+		return nil, nil
+	}
+	logrus.Info("Fetching Gitea repositories...")
+	giteaRepos := make(map[string]bool)
+	page := 1
+	for {
+		repos, resp, err := client.ListMyRepos(gitea.ListReposOptions{
+			ListOptions: gitea.ListOptions{
+				Page:     page,
+				PageSize: 50,
+			},
+		})
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range repos {
+			giteaRepos[r.Name] = true
+		}
+		if resp == nil || len(repos) < 50 {
+			break
+		}
+		page++
+	}
+	logrus.Infof("Found %d repositories on Gitea", len(giteaRepos))
+	return giteaRepos, nil
+}
+
+func compareRepos(githubRepos []*github.Repository, gitlabProjects map[string]bool, giteaRepos map[string]bool) []RepoStatus {
 	var statuses []RepoStatus
 	for _, repo := range githubRepos {
 		status := StatusNoRemote
-		// Note: p.Path in GitLab is equivalent to repoName in GitHub (usually). 
-		// Actually, gitlabProjects stores p.Path.
-		if gitlabProjects != nil && gitlabProjects[*repo.Name] {
-			status = StatusOutOfSync // Assume it needs sync if it exists
+		inGitLab := gitlabProjects != nil && gitlabProjects[*repo.Name]
+		inGitea := giteaRepos != nil && giteaRepos[*repo.Name]
+		if inGitLab || inGitea {
+			status = StatusOutOfSync // Remote exists, needs sync check
 		}
 		statuses = append(statuses, RepoStatus{
 			Repo:   repo,
@@ -329,12 +367,37 @@ func processRepository(ctx context.Context, repo *github.Repository, githubClien
 	}
 
 	if giteaClient != nil {
-		giteaSSHHost := os.Getenv("GITEA_SSH_HOST")
-		if giteaSSHHost == "" {
-			giteaSSHHost = "localhost"
+		giteaURL := os.Getenv("GITEA_URL")
+		if giteaURL == "" {
+			giteaURL = "http://localhost:3000"
 		}
-		giteaSSHURL := fmt.Sprintf("git@%s:%s/%s.git", giteaSSHHost, getGitHubLogin(), repoName)
-		mirrorURLs = append(mirrorURLs, giteaSSHURL)
+		giteaAuthProto := strings.ToLower(os.Getenv("GITEA_PROTOCOL"))
+
+		var mirrorURL string
+		if giteaAuthProto == "ssh" {
+			giteaSSHHost := os.Getenv("GITEA_SSH_HOST")
+			if giteaSSHHost == "" {
+				giteaSSHHost = "localhost"
+			}
+			giteaSSHPort := os.Getenv("GITEA_SSH_PORT")
+			if giteaSSHPort != "" && giteaSSHPort != "22" {
+				mirrorURL = fmt.Sprintf("ssh://git@%s:%s/%s/%s.git", giteaSSHHost, giteaSSHPort, getGitHubLogin(), repoName)
+			} else {
+				mirrorURL = fmt.Sprintf("git@%s:%s/%s.git", giteaSSHHost, getGitHubLogin(), repoName)
+			}
+		} else {
+			// HTTP / Token auth (Default & Recommended)
+			parsedURL, err := url.Parse(strings.TrimRight(giteaURL, "/"))
+			if err == nil {
+				parsedURL.User = url.UserPassword(getGitHubLogin(), os.Getenv("GITEA_TOKEN"))
+				parsedURL.Path = path.Join(parsedURL.Path, getGitHubLogin(), fmt.Sprintf("%s.git", repoName))
+				mirrorURL = parsedURL.String()
+			} else {
+				mirrorURL = fmt.Sprintf("%s/%s/%s.git", strings.TrimRight(giteaURL, "/"), getGitHubLogin(), repoName)
+			}
+		}
+
+		mirrorURLs = append(mirrorURLs, mirrorURL)
 
 		if err := ensureGiteaRepoExists(ctx, giteaClient, repoName, isPrivate, interactive); err != nil {
 			logrus.Warnf("Skipping Gitea sync for %s: %v", repoName, err)
@@ -480,17 +543,26 @@ func getGitHubLogin() string {
 	return "Apenasgabs"
 }
 
-func maskURL(u string) string {
-	// Procura o padrão :token@ e substitui o token por ***
-	// Ex: https://oauth2:MEU_TOKEN@gitlab.com -> https://oauth2:***@gitlab.com
+func maskURL(rawURL string) string {
+	parsed, err := url.Parse(rawURL)
+	if err == nil && parsed.User != nil {
+		if _, hasPassword := parsed.User.Password(); hasPassword {
+			parsed.User = url.UserPassword(parsed.User.Username(), "***")
+		} else {
+			parsed.User = url.User("***")
+		}
+		return parsed.String()
+	}
+
+	// Fallback para padrões simples caso parse falhe
 	start := -1
-	for i := 0; i < len(u); i++ {
-		if u[i] == ':' {
+	for i := 0; i < len(rawURL); i++ {
+		if rawURL[i] == ':' {
 			start = i
 		}
-		if u[i] == '@' && start != -1 {
-			return u[:start+1] + "***" + u[i:]
+		if rawURL[i] == '@' && start != -1 {
+			return rawURL[:start+1] + "***" + rawURL[i:]
 		}
 	}
-	return u
+	return rawURL
 }

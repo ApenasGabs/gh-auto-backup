@@ -21,8 +21,12 @@ services:
       - GITLAB_BASE_URL=${GITLAB_BASE_URL}
       # Custom Gitea instance URL (optional)
       - GITEA_URL=${GITEA_URL}
+      # Custom Gitea Auth Protocol (http or ssh, defaults to http)
+      - GITEA_PROTOCOL=${GITEA_PROTOCOL:-http}
       # Custom Gitea SSH Host (optional, defaults to localhost)
       - GITEA_SSH_HOST=${GITEA_SSH_HOST}
+      # Custom Gitea SSH Port (optional, defaults to 22)
+      - GITEA_SSH_PORT=${GITEA_SSH_PORT:-22}
       # Sync interval (default: 1h)
       - SYNC_INTERVAL=${SYNC_INTERVAL:-1h}
       # Worker count (default: 5)

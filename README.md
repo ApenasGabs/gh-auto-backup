@@ -35,8 +35,11 @@ cp .env.example .env
 Edite o `.env` com suas credenciais:
 *   `GITHUB_TOKEN`: Token com permissão de leitura de repositórios.
 *   `GITLAB_TOKEN`: Token com permissão de criação de projetos.
-*   `GITEA_TOKEN`: Token da sua instância Gitea.
-*   `GITEA_URL` & `GITEA_SSH_HOST`: Endereços da sua instância self-hosted.
+*   `GITEA_TOKEN`: Token de acesso pessoal (Personal Access Token) da sua instância Gitea.
+*   `GITEA_URL`: URL da sua instância Gitea (ex: `http://localhost:3000` ou `http://gitea.local:3000`).
+*   `GITEA_PROTOCOL`: Protocolo de autenticação (`http` ou `ssh`). Default: `http` (recomendado para automação sem necessidade de montar chaves SSH).
+*   `GITEA_SSH_HOST` & `GITEA_SSH_PORT`: Endereço e porta SSH da sua instância Gitea (caso `GITEA_PROTOCOL=ssh`).
+
 
 ### 3. Compilação
 Antes de rodar em qualquer ambiente, compile o binário:
